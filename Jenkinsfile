@@ -1,9 +1,16 @@
 pipeline {
-  agent any
+  agent {
+    docker {
+      image 'rust:latest'
+      args '-v /etc/passwd:/etc/passwd'
+    }
+  }
   stages {
     stage('Build') {
       steps {
-        sh 'echo "Building...."'
+          sshagent(credentials: ['playground']) {
+          sh "cargo build"
+    }
       }
     }
 
