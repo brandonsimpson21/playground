@@ -6,7 +6,11 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+opentelemetry = "0.21.0"
 thiserror = "1.0.50"
 tokio = { version = "1.35.0", features = ["full"] }
 tokio-stream = { version = "0.1.14", features = ["full"] }
+tracing = { version = "0.1.40", features = ["log", "async-await"] }
+tracing-opentelemetry = { version = "0.22.0", features = ["async-trait", "thiserror"] }
+tracing-subscriber = { version = "0.3.18", features = ["env-filter", "serde", "serde_json", "chrono", "tracing"] }
 url = { version = "2.5.0", features = ["serde"] }
