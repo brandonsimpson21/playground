@@ -1,6 +1,6 @@
 pipeline {
   agent {
-    docker {
+    kubernetes {
       image 'rust:latest'
       args '-v /etc/passwd:/etc/passwd'
     }
