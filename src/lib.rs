@@ -1,4 +1,5 @@
 pub mod error;
+pub mod tracing;
 
 #[cfg(test)]
 mod tests {
