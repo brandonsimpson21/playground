@@ -6,7 +6,15 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+ark-crypto-primitives = { version = "0.4.0", features = ["commitment", "encryption", "merkle_tree", "parallel", "rayon", "signature", "sponge", "tracing", "snark"] }
+ark-ec = { version = "0.4.2", features = ["parallel", "rayon"] }
+ark-ff = { version = "0.4.2", features = ["asm", "parallel", "rayon"] }
+ark-poly = { version = "0.4.2", features = ["rayon", "parallel"] }
+ark-poly-commit = "0.4.0"
+ark-std = { version = "0.4.0", features = ["getrandom", "parallel", "rayon"] }
+ark-test-curves = { version = "0.4.2", features = ["bls12_381_curve"] }
 opentelemetry = "0.21.0"
+sha3 = { version = "0.10.8", features = ["asm"] }
 thiserror = "1.0.50"
 tokio = { version = "1.35.0", features = ["full"] }
 tokio-stream = { version = "0.1.14", features = ["full"] }

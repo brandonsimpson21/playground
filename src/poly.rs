@@ -256,7 +256,9 @@ mod testpoly {
         let proof = poly.proof_single(sponge.clone(), comms.clone(), point, rands.clone());
         assert!(proof.is_ok());
         let proof = proof.unwrap();
-        let check = poly.check_single(point, sponge.clone(), proof, comms.clone());
+        let point2 = <Bls12_381 as Pairing>::ScalarField::rand(&mut test_rng());
+
+        let check = poly.check_single(point2, sponge.clone(), proof, comms.clone());
         assert!(check.is_ok());
         let check = check.unwrap();
         assert!(check);

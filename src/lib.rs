@@ -1,5 +1,6 @@
 pub mod error;
 pub mod tracing;
+pub mod poly;
 
 #[cfg(test)]
 mod tests {
