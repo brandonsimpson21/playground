@@ -6,7 +6,10 @@ use ark_crypto_primitives::sponge::{
 
 use ark_ec::{bls12::Bls12, pairing::Pairing};
 
-use ark_ff::{MontBackend, PrimeField as ArkFFPrimeField};
+use ark_ff::{
+    field_hashers::{DefaultFieldHasher, HashToField},
+    MontBackend, PrimeField as ArkFFPrimeField,
+};
 use ark_poly::{univariate::DensePolynomial, DenseUVPolynomial};
 
 use ark_poly_commit::{
@@ -25,6 +28,7 @@ type LabeledPoly = LabeledPolynomial<
     ark_ff::Fp<MontBackend<FrConfig, 4>, 4>,
     DensePolynomial<ark_ff::Fp<MontBackend<FrConfig, 4>, 4>>,
 >;
+
 type PolyCommitmentScheme =
     ark_poly_commit::kzg10::UniversalParams<Bls12<ark_test_curves::bls12_381::Config>>;
 type CommitKey =
@@ -63,7 +67,7 @@ impl Default for Poly {
         let rng = &mut test_rng();
         // TODO REMOVE
         tracing::warn!("PCS SETUP SHOULD BE REMOVED!!!");
-        let pp = PCS::setup(degree, None, rng).unwrap();
+        let pp: PolyCommitmentScheme = PCS::setup(degree, None, rng).unwrap();
         let label = "default".to_string();
         let (ck, vk) = PCS::trim(&pp, degree, 2, Some(&[degree])).unwrap();
         let poly = LabeledPolynomial::new(
@@ -99,6 +103,15 @@ impl Poly {
         }
     }
 
+    #[inline(always)]
+    pub fn eval(
+        &self,
+        point: &<Bls12_381 as Pairing>::ScalarField,
+    ) -> <Bls12_381 as Pairing>::ScalarField {
+        self.poly.evaluate(point)
+    }
+
+    #[inline(always)]
     pub fn commit(&self) -> (Vec<Commitment>, Vec<Rands>) {
         let rng = &mut test_rng();
         PCS::commit(&self.ck, [&self.poly], Some(rng)).unwrap()
@@ -107,19 +120,19 @@ impl Poly {
     pub fn proof_single(
         &self,
         sponge: PoseidonSponge<ark_ff::Fp<MontBackend<FrConfig, 4>, 4>>,
-        comms: Vec<Commitment>,
+        comms: &[Commitment],
         point: <Bls12_381 as Pairing>::ScalarField,
-        rands: Vec<Rands>,
+        rands: &[Rands],
     ) -> Result<Proof, PlaygroundError> {
         let mut sponge = sponge;
         let challenge_generator = ChallGenerator::new_univariate(&mut sponge);
         let proof = PCS::open(
             &self.ck,
             [&self.poly],
-            &comms,
+            comms,
             &point,
             &mut (challenge_generator.clone()),
-            &rands,
+            rands,
             None,
         );
         proof.map_err(|e| e.into())
@@ -129,8 +142,8 @@ impl Poly {
         &self,
         sponge: PoseidonSponge<ark_ff::Fp<MontBackend<FrConfig, 4>, 4>>,
         query_set: QuerySet<ark_ff::Fp<MontBackend<FrConfig, 4>, 4>>,
-        comms: Vec<Commitment>,
-        rands: Vec<Rands>,
+        comms: &[Commitment],
+        rands: &[Rands],
     ) -> Result<Vec<Proof>, PlaygroundError> {
         let rng = &mut test_rng();
         let mut sponge = sponge;
@@ -139,10 +152,10 @@ impl Poly {
         let batch_proofs = PCS::batch_open(
             &self.ck,
             [&self.poly],
-            &comms,
+            comms,
             &query_set,
             &mut (challenge_generator.clone()),
-            &rands,
+            rands,
             Some(rng),
         );
         batch_proofs.map_err(|e| e.into())
@@ -153,14 +166,14 @@ impl Poly {
         point: <Bls12_381 as Pairing>::ScalarField,
         sponge: PoseidonSponge<ark_ff::Fp<MontBackend<FrConfig, 4>, 4>>,
         proof: Proof,
-        comms: Vec<Commitment>,
+        comms: &[Commitment],
     ) -> Result<bool, PlaygroundError> {
         let rng = &mut test_rng();
         let mut sponge = sponge;
         let mut chall_gen = ChallGenerator::new_univariate(&mut sponge);
         PCS::check(
             &self.vk,
-            &comms,
+            comms,
             &point,
             [self.poly.evaluate(&point)],
             &proof,
@@ -172,23 +185,24 @@ impl Poly {
 
     pub fn check_batched(
         &self,
-        chall_gen: ChallGenerator,
-        proofs: Vec<Proof>,
-        comms: Vec<Commitment>,
-        query_set: QuerySet<ark_ff::Fp<MontBackend<FrConfig, 4>, 4>>,
+        sponge: PoseidonSponge<ark_ff::Fp<MontBackend<FrConfig, 4>, 4>>,
+        proofs: &[Proof],
+        comms: &[Commitment],
+        query_set: &QuerySet<ark_ff::Fp<MontBackend<FrConfig, 4>, 4>>,
         evals: Evaluations<
             ark_ff::Fp<MontBackend<FrConfig, 4>, 4>,
             ark_ff::Fp<MontBackend<FrConfig, 4>, 4>,
         >,
     ) -> Result<bool, PlaygroundError> {
         let rng = &mut test_rng();
-        let mut chall_gen = chall_gen;
+        let mut sponge = sponge;
+        let mut chall_gen = ChallGenerator::new_univariate(&mut sponge);
         PCS::batch_check(
             &self.vk,
-            &comms,
-            &query_set,
+            comms,
+            query_set,
             &evals,
-            &proofs,
+            &proofs.into(),
             &mut (chall_gen),
             rng,
         )
@@ -213,6 +227,51 @@ impl Poly {
             values.insert((self.label.clone(), point.clone()), value);
         }
         (query_set, values)
+    }
+
+    #[inline(always)]
+    pub fn sha256_hash_to_field<B: AsRef<[u8]>, F: ark_ff::PrimeField>(
+        &self,
+        bytes: B,
+        num_elements: usize,
+    ) -> Vec<F> {
+        let hasher =
+            <DefaultFieldHasher<ark_crypto_primitives::crh::sha256::Sha256> as HashToField<F>>::new(
+                self.label.as_bytes(),
+            );
+
+        hasher.hash_to_field(bytes.as_ref(), num_elements)
+    }
+
+    #[inline(always)]
+    pub fn blake3_hash_to_field<B: AsRef<[u8]>, F: ark_ff::PrimeField>(
+        &self,
+        bytes: B,
+        num_elements: usize,
+    ) -> Vec<F> {
+        let mut blake_hasher = blake3::Hasher::new();
+        blake_hasher.update(self.label.as_bytes());
+        blake_hasher.update(bytes.as_ref());
+        let mut reader = blake_hasher.finalize_xof();
+        let m = F::extension_degree() as usize;
+        let mut output = Vec::with_capacity(num_elements);
+        let mut base_prime_field_elems = Vec::with_capacity(m);
+        let len_per_base_elem = F::MODULUS_BIT_SIZE as usize;
+        let mut uniform_bytes = vec![0; len_per_base_elem * m * num_elements * m];
+        reader.fill(&mut uniform_bytes);
+        for i in (0..num_elements).into_iter() {
+            base_prime_field_elems.clear();
+            for j in (0..m).into_iter() {
+                let elm_offset = len_per_base_elem * (j + i * m);
+                let val = F::BasePrimeField::from_be_bytes_mod_order(
+                    &uniform_bytes[elm_offset..][..len_per_base_elem],
+                );
+                base_prime_field_elems.push(val);
+            }
+            let f = F::from_base_prime_field_elems(&base_prime_field_elems).unwrap();
+            output.push(f);
+        }
+        output
     }
 }
 
@@ -248,24 +307,70 @@ mod testpoly {
     use ark_ff::UniformRand;
 
     #[test]
-    fn test_poly() {
+    fn test_single_commitment() {
         let poly = Poly::default();
         let (comms, rands) = poly.commit();
         let sponge = test_sponge();
         let point = <Bls12_381 as Pairing>::ScalarField::rand(&mut test_rng());
-        let proof = poly.proof_single(sponge.clone(), comms.clone(), point, rands.clone());
+        let proof = poly.proof_single(sponge.clone(), &*comms, point, &*rands);
         assert!(proof.is_ok());
         let proof = proof.unwrap();
-
-        let check = poly.check_single(point, sponge.clone(), proof, comms.clone());
+        let check = poly.check_single(point, sponge.clone(), proof, &*comms);
         assert!(check.is_ok());
         let check = check.unwrap();
         assert!(check);
-
         let point2 = <Bls12_381 as Pairing>::ScalarField::rand(&mut test_rng());
-        let check = poly.check_single(point2, sponge.clone(), proof, comms.clone());
+        let check = poly.check_single(point2, sponge.clone(), proof, &*comms);
         assert!(check.is_ok());
         let check = check.unwrap();
         assert!(!check);
+    }
+
+    #[test]
+    fn test_batch() {
+        let poly = Poly::default();
+        let (comms, rands) = poly.commit();
+        let sponge = test_sponge();
+        let points = vec![<Bls12_381 as Pairing>::ScalarField::rand(&mut test_rng()); 10];
+        let (query_set, evals) = poly.get_query_eval_set(points.clone());
+        let proofs = poly.proof_batched(sponge.clone(), query_set.clone(), &*comms, &*rands);
+        assert!(proofs.is_ok());
+        let proofs = proofs.unwrap();
+        let check = poly.check_batched(sponge.clone(), &*proofs, &*comms, &query_set, evals);
+        assert!(check.is_ok());
+        let check = check.unwrap();
+        assert!(check);
+    }
+
+    #[test]
+    fn test_sha_256_hash() {
+        let poly = Poly::default();
+        let (comms, rands) = poly.commit();
+        let sponge = test_sponge();
+        let points = poly.sha256_hash_to_field(b"hello, world", 10);
+        let (query_set, evals) = poly.get_query_eval_set(points.clone());
+        let proofs = poly.proof_batched(sponge.clone(), query_set.clone(), &*comms, &*rands);
+        assert!(proofs.is_ok());
+        let proofs = proofs.unwrap();
+        let check = poly.check_batched(sponge.clone(), &*proofs, &*comms, &query_set, evals);
+        assert!(check.is_ok());
+        let check = check.unwrap();
+        assert!(check);
+    }
+
+    #[test]
+    fn test_blake3_hash() {
+        let poly = Poly::default();
+        let (comms, rands) = poly.commit();
+        let sponge = test_sponge();
+        let points = poly.blake3_hash_to_field(b"hello, world", 10);
+        let (query_set, evals) = poly.get_query_eval_set(points.clone());
+        let proofs = poly.proof_batched(sponge.clone(), query_set.clone(), &*comms, &*rands);
+        assert!(proofs.is_ok());
+        let proofs = proofs.unwrap();
+        let check = poly.check_batched(sponge.clone(), &*proofs, &*comms, &query_set, evals);
+        assert!(check.is_ok());
+        let check = check.unwrap();
+        assert!(check);
     }
 }

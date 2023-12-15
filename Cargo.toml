@@ -13,7 +13,12 @@ ark-poly = { version = "0.4.2", features = ["rayon", "parallel"] }
 ark-poly-commit = "0.4.0"
 ark-std = { version = "0.4.0", features = ["getrandom", "parallel", "rayon"] }
 ark-test-curves = { version = "0.4.2", features = ["bls12_381_curve"] }
+blake3 = { version = "1.5.0", features = ["rayon", "serde", "digest", "mmap"] }
+num = { version = "0.4.1", features = ["num-bigint", "rand", "serde", "alloc"] }
 opentelemetry = "0.21.0"
+rayon = "1.8.0"
+ring = "0.17.7"
+salvo = { version = "0.63.0", features = ["full"] }
 sha3 = { version = "0.10.8", features = ["asm"] }
 thiserror = "1.0.50"
 tokio = { version = "1.35.0", features = ["full"] }
