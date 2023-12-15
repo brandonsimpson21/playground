@@ -1,18 +1,17 @@
 use crate::error::PlaygroundError;
 use ark_crypto_primitives::sponge::{
     poseidon::{PoseidonConfig, PoseidonSponge},
-    CryptographicSponge
+    CryptographicSponge,
 };
 
-use ark_ec::{bls12::Bls12,pairing::Pairing};
+use ark_ec::{bls12::Bls12, pairing::Pairing};
 
 use ark_ff::{MontBackend, PrimeField as ArkFFPrimeField};
-use ark_poly::{univariate::DensePolynomial, DenseUVPolynomial, };
+use ark_poly::{univariate::DensePolynomial, DenseUVPolynomial};
 
 use ark_poly_commit::{
-    LabeledCommitment,
-    challenge::ChallengeGenerator, marlin_pc::MarlinKZG10, Evaluations, LabeledPolynomial,
-    PolynomialCommitment, QuerySet,
+    challenge::ChallengeGenerator, marlin_pc::MarlinKZG10, Evaluations, LabeledCommitment,
+    LabeledPolynomial, PolynomialCommitment, QuerySet,
 };
 use ark_std::test_rng;
 use ark_test_curves::bls12_381::{Bls12_381, FrConfig};
@@ -125,6 +124,7 @@ impl Poly {
         );
         proof.map_err(|e| e.into())
     }
+
     pub fn proof_batched(
         &self,
         sponge: PoseidonSponge<ark_ff::Fp<MontBackend<FrConfig, 4>, 4>>,
@@ -267,6 +267,5 @@ mod testpoly {
         assert!(check.is_ok());
         let check = check.unwrap();
         assert!(!check);
-
     }
 }

@@ -1,5 +1,5 @@
+use std::{array::TryFromSliceError, env::VarError, io};
 use thiserror::Error;
-use std::{io, env::VarError, array::TryFromSliceError};
 
 #[derive(Error, Debug)]
 pub enum PlaygroundError {
@@ -14,7 +14,6 @@ pub enum PlaygroundError {
     #[error("unknown error")]
     Unknown,
 }
-
 
 impl From<VarError> for PlaygroundError {
     fn from(error: VarError) -> Self {
