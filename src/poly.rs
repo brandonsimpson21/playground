@@ -13,41 +13,35 @@ use ark_ff::{
 use ark_poly::{univariate::DensePolynomial, DenseUVPolynomial};
 
 use ark_poly_commit::{
-    challenge::ChallengeGenerator, marlin_pc::MarlinKZG10, Evaluations, LabeledCommitment,
-    LabeledPolynomial, PolynomialCommitment, QuerySet,
+    challenge::ChallengeGenerator,
+    kzg10,
+    marlin_pc::MarlinKZG10,
+    marlin_pc::{self, CommitterKey, Randomness, VerifierKey},
+    Evaluations, LabeledCommitment, LabeledPolynomial, PolynomialCommitment, QuerySet,
 };
 use ark_std::test_rng;
 use ark_test_curves::bls12_381::{Bls12_381, FrConfig};
 
-pub type UniPoly381 = DensePolynomial<<Bls12_381 as Pairing>::ScalarField>;
-pub type SpongeBls312 = PoseidonSponge<<Bls12_381 as Pairing>::ScalarField>;
+pub type PrimeScalarField = <Bls12_381 as Pairing>::ScalarField;
+pub type PField = ark_ff::Fp<MontBackend<FrConfig, 4>, 4>;
+pub type UniPoly381 = DensePolynomial<PrimeScalarField>;
+pub type SpongeBls312 = PoseidonSponge<PrimeScalarField>;
 pub type PCS = MarlinKZG10<Bls12_381, UniPoly381, SpongeBls312>;
-pub type ChallGenerator = ChallengeGenerator<<Bls12_381 as Pairing>::ScalarField, SpongeBls312>;
-
-type LabeledPoly = LabeledPolynomial<
-    ark_ff::Fp<MontBackend<FrConfig, 4>, 4>,
-    DensePolynomial<ark_ff::Fp<MontBackend<FrConfig, 4>, 4>>,
->;
-
-type PolyCommitmentScheme =
-    ark_poly_commit::kzg10::UniversalParams<Bls12<ark_test_curves::bls12_381::Config>>;
-type CommitKey =
-    ark_poly_commit::marlin_pc::CommitterKey<Bls12<ark_test_curves::bls12_381::Config>>;
-type VerifyKey = ark_poly_commit::marlin_pc::VerifierKey<Bls12<ark_test_curves::bls12_381::Config>>;
-type Commitment = LabeledCommitment<
-    ark_poly_commit::marlin_pc::Commitment<Bls12<ark_test_curves::bls12_381::Config>>,
->;
-type Rands = ark_poly_commit::marlin_pc::Randomness<
-    ark_ff::Fp<MontBackend<FrConfig, 4>, 4>,
-    DensePolynomial<ark_ff::Fp<MontBackend<FrConfig, 4>, 4>>,
->;
-type Proof = ark_poly_commit::kzg10::Proof<Bls12<ark_test_curves::bls12_381::Config>>;
+pub type ChallGenerator = ChallengeGenerator<PrimeScalarField, SpongeBls312>;
+pub type LabeledPoly = LabeledPolynomial<PField, DensePolynomial<PField>>;
+pub type BLSPairingConfig = Bls12<ark_test_curves::bls12_381::Config>;
+pub type PolyCommitmentScheme = kzg10::UniversalParams<BLSPairingConfig>;
+pub type CommitKey = CommitterKey<BLSPairingConfig>;
+pub type VerifyKey = VerifierKey<BLSPairingConfig>;
+pub type Commitment = LabeledCommitment<marlin_pc::Commitment<BLSPairingConfig>>;
+pub type Rands = Randomness<PField, DensePolynomial<PField>>;
+pub type Proof = kzg10::Proof<BLSPairingConfig>;
 
 #[derive(Clone)]
 pub struct Poly {
     pub label: String,
-    pub degree: usize,
     pub poly: LabeledPoly,
+    pub pcs: PolyCommitmentScheme,
     ck: CommitKey,
     vk: VerifyKey,
 }
@@ -55,7 +49,7 @@ pub struct Poly {
 impl std::fmt::Debug for Poly {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Poly")
-            .field("degree", &self.degree)
+            .field("degree", &self.degree())
             .field("poly", &self.poly)
             .finish()
     }
@@ -67,9 +61,11 @@ impl Default for Poly {
         let rng = &mut test_rng();
         // TODO REMOVE
         tracing::warn!("PCS SETUP SHOULD BE REMOVED!!!");
-        let pp: PolyCommitmentScheme = PCS::setup(degree, None, rng).unwrap();
+        tracing::error!("PCS SETUP SHOULD BE REMOVED!!!");
+        let pcs: PolyCommitmentScheme = PCS::setup(degree, None, rng).unwrap();
         let label = "default".to_string();
-        let (ck, vk) = PCS::trim(&pp, degree, 2, Some(&[degree])).unwrap();
+        let (ck, vk) = PCS::trim(&pcs, degree, 2, Some(&[degree])).unwrap();
+
         let poly = LabeledPolynomial::new(
             label.clone(),
             UniPoly381::rand(degree, &mut test_rng()),
@@ -78,8 +74,8 @@ impl Default for Poly {
         );
         Self {
             label,
-            degree,
             poly,
+            pcs,
             ck,
             vk,
         }
@@ -88,26 +84,30 @@ impl Default for Poly {
 
 impl Poly {
     pub fn new(
-        degree: usize,
         label: &str,
         poly: LabeledPoly,
+        pcs: PolyCommitmentScheme,
         ck: CommitKey,
         vk: VerifyKey,
     ) -> Self {
         Self {
             label: label.to_string(),
-            degree,
             poly,
+            pcs,
             ck,
             vk,
         }
     }
+    pub fn degree(&self) -> usize {
+        self.poly.degree()
+    }
+
+    pub fn polynomial(&self) -> &UniPoly381 {
+        self.poly.polynomial()
+    }
 
     #[inline(always)]
-    pub fn eval(
-        &self,
-        point: &<Bls12_381 as Pairing>::ScalarField,
-    ) -> <Bls12_381 as Pairing>::ScalarField {
+    pub fn evaluate(&self, point: &PrimeScalarField) -> PrimeScalarField {
         self.poly.evaluate(point)
     }
 
@@ -119,9 +119,9 @@ impl Poly {
 
     pub fn proof_single(
         &self,
-        sponge: PoseidonSponge<ark_ff::Fp<MontBackend<FrConfig, 4>, 4>>,
+        sponge: PoseidonSponge<PField>,
         comms: &[Commitment],
-        point: <Bls12_381 as Pairing>::ScalarField,
+        point: PrimeScalarField,
         rands: &[Rands],
     ) -> Result<Proof, PlaygroundError> {
         let mut sponge = sponge;
@@ -140,8 +140,8 @@ impl Poly {
 
     pub fn proof_batched(
         &self,
-        sponge: PoseidonSponge<ark_ff::Fp<MontBackend<FrConfig, 4>, 4>>,
-        query_set: QuerySet<ark_ff::Fp<MontBackend<FrConfig, 4>, 4>>,
+        sponge: PoseidonSponge<PField>,
+        query_set: QuerySet<PField>,
         comms: &[Commitment],
         rands: &[Rands],
     ) -> Result<Vec<Proof>, PlaygroundError> {
@@ -163,8 +163,8 @@ impl Poly {
 
     pub fn check_single(
         &self,
-        point: <Bls12_381 as Pairing>::ScalarField,
-        sponge: PoseidonSponge<ark_ff::Fp<MontBackend<FrConfig, 4>, 4>>,
+        point: PrimeScalarField,
+        sponge: PoseidonSponge<PField>,
         proof: Proof,
         comms: &[Commitment],
     ) -> Result<bool, PlaygroundError> {
@@ -185,14 +185,11 @@ impl Poly {
 
     pub fn check_batched(
         &self,
-        sponge: PoseidonSponge<ark_ff::Fp<MontBackend<FrConfig, 4>, 4>>,
+        sponge: PoseidonSponge<PField>,
         proofs: &[Proof],
         comms: &[Commitment],
-        query_set: &QuerySet<ark_ff::Fp<MontBackend<FrConfig, 4>, 4>>,
-        evals: Evaluations<
-            ark_ff::Fp<MontBackend<FrConfig, 4>, 4>,
-            ark_ff::Fp<MontBackend<FrConfig, 4>, 4>,
-        >,
+        query_set: &QuerySet<PField>,
+        evals: Evaluations<PField, PField>,
     ) -> Result<bool, PlaygroundError> {
         let rng = &mut test_rng();
         let mut sponge = sponge;
@@ -211,20 +208,14 @@ impl Poly {
 
     pub fn get_query_eval_set(
         &self,
-        points: Vec<<Bls12_381 as Pairing>::ScalarField>,
-    ) -> (
-        QuerySet<ark_ff::Fp<MontBackend<FrConfig, 4>, 4>>,
-        Evaluations<
-            ark_ff::Fp<MontBackend<FrConfig, 4>, 4>,
-            ark_ff::Fp<MontBackend<FrConfig, 4>, 4>,
-        >,
-    ) {
+        points: Vec<PrimeScalarField>,
+    ) -> (QuerySet<PField>, Evaluations<PField, PField>) {
         let mut query_set = QuerySet::new();
         let mut values = Evaluations::new();
         for (i, point) in points.iter().enumerate() {
-            query_set.insert((self.label.clone(), (format!("{}", i), point.clone())));
-            let value = self.poly.evaluate(&point);
-            values.insert((self.label.clone(), point.clone()), value);
+            query_set.insert((self.label.clone(), (format!("{}", i), *point)));
+            let value = self.poly.evaluate(point);
+            values.insert((self.label.clone(), *point), value);
         }
         (query_set, values)
     }
@@ -259,9 +250,9 @@ impl Poly {
         let len_per_base_elem = F::MODULUS_BIT_SIZE as usize;
         let mut uniform_bytes = vec![0; len_per_base_elem * m * num_elements * m];
         reader.fill(&mut uniform_bytes);
-        for i in (0..num_elements).into_iter() {
+        for i in 0..num_elements {
             base_prime_field_elems.clear();
-            for j in (0..m).into_iter() {
+            for j in 0..m {
                 let elm_offset = len_per_base_elem * (j + i * m);
                 let val = F::BasePrimeField::from_be_bytes_mod_order(
                     &uniform_bytes[elm_offset..][..len_per_base_elem],
@@ -301,9 +292,78 @@ pub fn test_sponge<F: ArkFFPrimeField>() -> PoseidonSponge<F> {
     PoseidonSponge::new(&config)
 }
 
+impl std::ops::Add for Poly {
+    type Output = Self;
+
+    fn add(self, rhs: Self) -> Self::Output {
+        let degree_bound = self.poly.degree_bound();
+        let hiding_bound = self.poly.hiding_bound();
+        let poly = self.poly.polynomial() + rhs.poly.polynomial();
+        Self {
+            label: self.label.clone(),
+            poly: LabeledPolynomial::new(self.label.clone(), poly, degree_bound, hiding_bound),
+            pcs: self.pcs,
+            ck: self.ck,
+            vk: self.vk,
+        }
+    }
+}
+
+impl std::ops::Mul for Poly {
+    type Output = Self;
+
+    fn mul(self, rhs: Self) -> Self::Output {
+        let degree_bound = self.poly.degree_bound();
+        let hiding_bound = self.poly.hiding_bound();
+        let poly = self.poly.polynomial() * rhs.poly.polynomial();
+        Self {
+            label: self.label.clone(),
+            poly: LabeledPolynomial::new(self.label.clone(), poly, degree_bound, hiding_bound),
+            pcs: self.pcs,
+            ck: self.ck,
+            vk: self.vk,
+        }
+    }
+}
+
+impl std::ops::Sub for Poly {
+    type Output = Self;
+
+    fn sub(self, rhs: Self) -> Self::Output {
+        let degree_bound = self.poly.degree_bound();
+        let hiding_bound = self.poly.hiding_bound();
+        let poly = self.poly.polynomial() - rhs.poly.polynomial();
+        Self {
+            label: self.label.clone(),
+            poly: LabeledPolynomial::new(self.label.clone(), poly, degree_bound, hiding_bound),
+            pcs: self.pcs,
+            ck: self.ck,
+            vk: self.vk,
+        }
+    }
+}
+
+impl std::ops::Div for Poly {
+    type Output = Self;
+
+    fn div(self, rhs: Self) -> Self::Output {
+        let degree_bound = self.poly.degree_bound();
+        let hiding_bound = self.poly.hiding_bound();
+        let poly = self.poly.polynomial() / rhs.poly.polynomial();
+        Self {
+            label: self.label.clone(),
+            poly: LabeledPolynomial::new(self.label.clone(), poly, degree_bound, hiding_bound),
+            pcs: self.pcs,
+            ck: self.ck,
+            vk: self.vk,
+        }
+    }
+}
+
 #[cfg(test)]
 mod testpoly {
     use super::*;
+    use ark_crypto_primitives::sponge::poseidon::PoseidonSpongeState;
     use ark_ff::UniformRand;
 
     #[test]
@@ -311,7 +371,7 @@ mod testpoly {
         let poly = Poly::default();
         let (comms, rands) = poly.commit();
         let sponge = test_sponge();
-        let point = <Bls12_381 as Pairing>::ScalarField::rand(&mut test_rng());
+        let point = PrimeScalarField::rand(&mut test_rng());
         let proof = poly.proof_single(sponge.clone(), &*comms, point, &*rands);
         assert!(proof.is_ok());
         let proof = proof.unwrap();
@@ -319,7 +379,7 @@ mod testpoly {
         assert!(check.is_ok());
         let check = check.unwrap();
         assert!(check);
-        let point2 = <Bls12_381 as Pairing>::ScalarField::rand(&mut test_rng());
+        let point2 = PrimeScalarField::rand(&mut test_rng());
         let check = poly.check_single(point2, sponge.clone(), proof, &*comms);
         assert!(check.is_ok());
         let check = check.unwrap();
@@ -331,7 +391,7 @@ mod testpoly {
         let poly = Poly::default();
         let (comms, rands) = poly.commit();
         let sponge = test_sponge();
-        let points = vec![<Bls12_381 as Pairing>::ScalarField::rand(&mut test_rng()); 10];
+        let points = vec![PrimeScalarField::rand(&mut test_rng()); 10];
         let (query_set, evals) = poly.get_query_eval_set(points.clone());
         let proofs = poly.proof_batched(sponge.clone(), query_set.clone(), &*comms, &*rands);
         assert!(proofs.is_ok());
