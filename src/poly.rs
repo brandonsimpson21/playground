@@ -433,4 +433,12 @@ mod testpoly {
         let check = check.unwrap();
         assert!(check);
     }
+
+    #[test]
+    fn test_poly(){
+        let poly = Poly::default();
+        let (comms, rands) = poly.commit();
+        println!("comms: {:?}", comms.len());
+
+    }
 }
